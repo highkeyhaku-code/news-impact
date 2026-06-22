@@ -78,6 +78,7 @@ export default function HomePage() {
   const [activeTab, setActiveTab] = useState<'latest' | 'search' | 'bookmark'>('latest');
   const [newsList, setNewsList] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [dbError, setDbError] = useState<string | null>(null);
 
   // フィルター用ステート
   const [filterGenre, setFilterGenre] = useState('All');
@@ -88,15 +89,29 @@ export default function HomePage() {
   // ニュース収集・取得関数 
   const fetchNewsFromApi = useCallback(async (isSearch = false, targetTab?: 'latest' | 'search' | 'bookmark') => {
     setLoading(true);
+    setDbError(null);
     const currentTab = targetTab || activeTab;
 
     try {
       if (currentTab === 'bookmark') {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('news')
           .select('*')
           .eq('is_bookmarked', true)
           .order('published_at', { ascending: false });
+        
+        if (error) {
+          console.error("ブックマーク読み込みエラー:", error);
+          if (error.code === '42P01') {
+            setDbError("news テーブルがデータベースに存在しません。プロジェクトのルートにある `supabase_setup.sql` を Supabase の SQL Editor で実行して、テーブルを作成してください。");
+          } else {
+            setDbError(error.message);
+          }
+          setNewsList([]);
+          setLoading(false);
+          return;
+        }
+
         setNewsList(data || []);
         setLoading(false);
         return;
@@ -117,14 +132,20 @@ export default function HomePage() {
       }
 
       const res = await fetch(`/api/fetch-news?${params.toString()}`);
+      if (!res.ok) {
+        throw new Error("APIリクエストが失敗しました");
+      }
       const data = await res.json();
 
-      // クライアント側でのフィルターはもう不要（サーバーでやってくれるから）
-      // そのままセットするだけでOK！
+      if (data && typeof data === 'object' && 'error' in data) {
+        throw new Error(data.error || "ニュース取得エラー");
+      }
+
       setNewsList(data || []);
-    } catch (e) {
-      console.error(e);
-      alert("ニュースの取得に失敗しました");
+    } catch (e: any) {
+      console.error("ニュースのフェッチに失敗しました:", e);
+      setDbError("ニュースの取得に失敗しました。Supabaseのデータベースに 'news' テーブルが存在しない可能性があります。プロジェクトのルートにある `supabase_setup.sql` を実行して、テーブルを作成してください。");
+      setNewsList([]);
     } finally {
       setLoading(false);
     }
@@ -161,7 +182,12 @@ export default function HomePage() {
       }
       return prev.map(n => n.id === id ? { ...n, is_bookmarked: !current } : n);
     });
-    await supabase.from('news').update({ is_bookmarked: !current }).eq('id', id);
+    
+    const { error } = await supabase.from('news').update({ is_bookmarked: !current }).eq('id', id);
+    if (error) {
+      console.error("ブックマーク更新エラー:", error);
+      alert(`ブックマークの保存に失敗しました: ${error.message}`);
+    }
   };
 
   return (
@@ -188,6 +214,12 @@ export default function HomePage() {
 
       <main className="flex-1 p-4 md:p-8 overflow-y-auto">
         <div className="max-w-4xl mx-auto">
+          {dbError && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-200 border-l-4 border-l-red-500 rounded-lg text-red-700 text-sm shadow-sm">
+              <p className="font-bold flex items-center gap-1.5">⚠️ データベースエラー</p>
+              <p className="mt-1 text-gray-600 font-medium">{dbError}</p>
+            </div>
+          )}
           <div className="mb-6 flex justify-between items-center">
             <h2 className="text-2xl font-bold text-gray-800">
               {activeTab === 'latest' && '🔥 今日のヘッドライン'}

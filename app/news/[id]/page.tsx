@@ -42,9 +42,21 @@ export default async function NewsDetailPage({ params }: { params: { id: string 
     .single();
 
   if (error || !news) {
+    const isMissingTable = error?.code === '42P01';
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-500">
-        ニュースが見つかりません
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-gray-500 p-4">
+        <span className="text-4xl mb-2">⚠️</span>
+        <h2 className="text-lg font-bold text-gray-800 mb-1">
+          {isMissingTable ? 'データベースエラー' : 'ニュースが見つかりません'}
+        </h2>
+        <p className="text-sm text-gray-500 max-w-md text-center leading-relaxed">
+          {isMissingTable
+            ? "news テーブルがデータベースに存在しません。プロジェクトのルートにある `supabase_setup.sql` を Supabase の SQL Editor で実行して、テーブルを作成してください。"
+            : "指定されたニュースが見つかりません。すでに削除されたか、IDが間違っている可能性があります。"}
+        </p>
+        <Link href="/" className="mt-6 text-sm font-bold text-blue-600 hover:underline">
+          🏠 ホームへ戻る
+        </Link>
       </div>
     );
   }

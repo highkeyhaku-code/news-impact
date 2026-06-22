@@ -119,6 +119,7 @@ function DroppableColumn({ id, title, items, colorClass }: { id: string, title: 
 export default function WatchlistPage() {
   const [list, setList] = useState<WatchlistItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dbError, setDbError] = useState<string | null>(null);
 
   // 【重要】センサー設定：マウスを5px動かしたらドラッグ開始（クリックと区別しつつ即座に反応）
   const sensors = useSensors(
@@ -131,6 +132,7 @@ export default function WatchlistPage() {
 
   useEffect(() => {
     const fetchWatchlist = async () => {
+      setDbError(null);
       const { data: watchlistData, error } = await supabase
         .from('watchlist')
         .select('*')
@@ -138,19 +140,28 @@ export default function WatchlistPage() {
 
       if (error || !watchlistData) {
         console.error("読み込みエラー:", error);
+        if (error?.code === '42P01') {
+          setDbError("watchlist テーブルがデータベースに存在しません。プロジェクトのルートにある `supabase_setup.sql` を Supabase の SQL Editor で実行して、テーブルを作成してください。");
+        } else {
+          setDbError(error?.message || "データの読み込みに失敗しました。Supabaseの接続設定やテーブルが存在するか確認してください。");
+        }
         setLoading(false);
         return;
       }
 
       const mergedList: WatchlistItem[] = [];
       for (const item of watchlistData) {
-        const { data: newsData } = await supabase
+        const { data: newsData, error: newsError } = await supabase
           .from('news')
           .select('id') 
           .eq('symbol', item.symbol)
           .order('published_at', { ascending: false })
           .limit(1)
           .single();
+
+        if (newsError && newsError.code !== 'PGRST116') {
+          console.warn("ニュース読み込みエラー:", newsError);
+        }
 
         mergedList.push({
           ...item,
@@ -212,6 +223,12 @@ export default function WatchlistPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-6">
+        {dbError && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 border-l-4 border-l-red-500 rounded-lg text-red-700 text-sm shadow-sm">
+            <p className="font-bold flex items-center gap-1.5">⚠️ データベースエラー</p>
+            <p className="mt-1 text-gray-600 font-medium">{dbError}</p>
+          </div>
+        )}
         {loading ? (
           <div className="text-center py-20 text-gray-400 text-sm">ボードを準備中...</div>
         ) : (
