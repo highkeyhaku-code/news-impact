@@ -134,7 +134,71 @@ export default async function NewsDetailPage({ params }: { params: { id: string 
     }
   }
 
-  const otherEventDates = relatedNews?.map(n => n.published_at) || [];
+  // インパクト指標の計算
+  let impactStats: {
+    prevPrice: number;
+    todayPrice: number;
+    todayDiff: number;
+    todayPercent: number;
+    after3Price?: number;
+    after3Diff?: number;
+    after3Percent?: number;
+    after5Price?: number;
+    after5Diff?: number;
+    after5Percent?: number;
+  } | null = null;
+
+  if (chartData.length > 0) {
+    const newsDateStr = news.published_at.split('T')[0];
+    let todayIdx = chartData.findIndex(d => d.date === newsDateStr);
+    
+    // 土日などで見つからない場合は、ニュース直後の営業日を採用
+    if (todayIdx === -1) {
+      todayIdx = chartData.findIndex(d => d.date > newsDateStr);
+    }
+
+    if (todayIdx !== -1 && todayIdx > 0) {
+      const prevData = chartData[todayIdx - 1];
+      const todayData = chartData[todayIdx];
+
+      const getStats = (targetPrice: number, basePrice: number) => {
+        const diff = targetPrice - basePrice;
+        const percent = (diff / basePrice) * 100;
+        return { diff, percent };
+      };
+
+      const todayStats = getStats(todayData.price, prevData.price);
+      
+      impactStats = {
+        prevPrice: prevData.price,
+        todayPrice: todayData.price,
+        todayDiff: todayStats.diff,
+        todayPercent: todayStats.percent,
+      };
+
+      if (todayIdx + 3 < chartData.length) {
+        const after3Data = chartData[todayIdx + 3];
+        const stats = getStats(after3Data.price, prevData.price);
+        impactStats.after3Price = after3Data.price;
+        impactStats.after3Diff = stats.diff;
+        impactStats.after3Percent = stats.percent;
+      }
+
+      if (todayIdx + 5 < chartData.length) {
+        const after5Data = chartData[todayIdx + 5];
+        const stats = getStats(after5Data.price, prevData.price);
+        impactStats.after5Price = after5Data.price;
+        impactStats.after5Diff = stats.diff;
+        impactStats.after5Percent = stats.percent;
+      }
+    }
+  }
+
+  const otherEventsData = relatedNews?.map(n => ({
+    date: n.published_at,
+    title: n.title,
+    id: n.id
+  })) || [];
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20 font-sans text-gray-800">
@@ -215,12 +279,56 @@ export default async function NewsDetailPage({ params }: { params: { id: string 
             {apiError && <span className="text-xs text-red-500 font-normal bg-red-50 px-2 py-0.5 rounded">(データ取得制限中)</span>}
           </h2>
 
+          {/* インパクト分析サマリーカード */}
+          {impactStats && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+              <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                <span className="text-xs font-bold text-gray-400 block mb-1">発表当日インパクト (前営業日比)</span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-xl font-extrabold text-gray-800">${impactStats.todayPrice.toFixed(2)}</span>
+                  <span className={`text-sm font-bold flex items-center ${impactStats.todayDiff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {impactStats.todayDiff >= 0 ? '▲' : '▼'} {Math.abs(impactStats.todayPercent).toFixed(2)}%
+                  </span>
+                </div>
+                <span className="text-[10px] text-gray-400 font-mono">前営業日終値: ${impactStats.prevPrice.toFixed(2)}</span>
+              </div>
+              
+              {impactStats.after3Price !== undefined && (
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                  <span className="text-xs font-bold text-gray-400 block mb-1">発表3営業日後</span>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-xl font-extrabold text-gray-800">${impactStats.after3Price.toFixed(2)}</span>
+                    <span className={`text-sm font-bold flex items-center ${impactStats.after3Diff! >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {impactStats.after3Diff! >= 0 ? '▲' : '▼'} {Math.abs(impactStats.after3Percent!).toFixed(2)}%
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-gray-400 font-mono">発表前比での累積変化</span>
+                </div>
+              )}
+
+              {impactStats.after5Price !== undefined && (
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+                  <span className="text-xs font-bold text-gray-400 block mb-1">発表5営業日後</span>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-xl font-extrabold text-gray-800">${impactStats.after5Price.toFixed(2)}</span>
+                    <span className={`text-sm font-bold flex items-center ${impactStats.after5Diff! >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {impactStats.after5Diff! >= 0 ? '▲' : '▼'} {Math.abs(impactStats.after5Percent!).toFixed(2)}%
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-gray-400 font-mono">発表前比での累積変化</span>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="bg-white p-1 rounded-xl shadow-sm border border-gray-200">
             {chartData.length > 0 ? (
               <AnalysisChartWrapper 
                 data={chartData} 
                 newsDate={news.published_at}
-                otherEvents={otherEventDates}
+                newsTitle={news.title}
+                newsId={news.id}
+                otherEvents={otherEventsData}
               />
             ) : (
               <div className="bg-gray-50 rounded-xl h-64 flex flex-col items-center justify-center text-gray-400 gap-2">

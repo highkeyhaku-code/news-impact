@@ -67,6 +67,49 @@ export async function GET(request: Request) {
   const startDate = searchParams.get('startDate'); 
   const endDate = searchParams.get('endDate');
 
+  // JSTでの「今日」の範囲をUTC基準で計算する
+  const jstOffset = 9 * 60 * 60 * 1000;
+  const now = new Date();
+  const jstNow = new Date(now.getTime() + jstOffset);
+
+  // JSTの今日00:00:00に対応するUTC
+  const jstTodayStart = new Date(Date.UTC(jstNow.getUTCFullYear(), jstNow.getUTCMonth(), jstNow.getUTCDate(), 0, 0, 0));
+  const utcStart = new Date(jstTodayStart.getTime() - jstOffset);
+
+  // JSTの今日23:59:59に対応するUTC
+  const jstTodayEnd = new Date(Date.UTC(jstNow.getUTCFullYear(), jstNow.getUTCMonth(), jstNow.getUTCDate(), 23, 59, 59));
+  const utcEnd = new Date(jstTodayEnd.getTime() - jstOffset);
+
+  const formatToAlphaVantage = (date: Date): string => {
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(date.getUTCDate()).padStart(2, '0');
+    const hh = String(date.getUTCHours()).padStart(2, '0');
+    const mm = String(date.getUTCMinutes()).padStart(2, '0');
+    const ss = String(date.getUTCSeconds()).padStart(2, '0');
+    return `${y}${m}${d}T${hh}${mm}${ss}`;
+  };
+
+  const startStr = formatToAlphaVantage(utcStart);
+  const endStr = formatToAlphaVantage(utcEnd);
+
+  // MOCK_NEWS の日付を動的に今日に書き換えるヘルパー
+  const convertMockNewsToToday = (mocks: NewsFeedItem[]): NewsFeedItem[] => {
+    const yyyy = jstNow.getUTCFullYear();
+    const mm = String(jstNow.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(jstNow.getUTCDate()).padStart(2, '0');
+    return mocks.map((item, idx) => {
+      // JSTの10:00, 12:00, 14:00, 16:00 になるようにUTCを設定 (JST = UTC + 9h)
+      // UTCでは 01:00, 03:00, 05:00, 07:00
+      const hh = String(1 + idx * 2).padStart(2, '0');
+      const time_published = `${yyyy}${mm}${dd}T${hh}0000`;
+      return {
+        ...item,
+        time_published
+      };
+    });
+  };
+
   // 1. キャッシュチェック (latestのみ)
   if (type === 'latest') {
     const { data: latestRecords } = await supabase
@@ -85,8 +128,10 @@ export async function GET(request: Request) {
         const { data: cachedData } = await supabase
           .from('news')
           .select('*')
+          .gte('published_at', startStr)
+          .lte('published_at', endStr)
           .order('published_at', { ascending: false })
-          .limit(50);
+          .limit(100);
         return NextResponse.json(cachedData);
       }
     }
@@ -105,13 +150,14 @@ export async function GET(request: Request) {
     let feedData: NewsFeedItem[] = [];
     if (data.Information || !data.feed) {
       console.warn("API制限到達: ダミー使用");
-      feedData = MOCK_NEWS.filter(item => {
+      const todayMocks = convertMockNewsToToday(MOCK_NEWS);
+      feedData = todayMocks.filter(item => {
         let match = true;
         if (symbol) match = match && (item.ticker_sentiment?.some((t) => t.ticker.includes(symbol)) ?? false);
         if (genre && genre !== 'All') match = match && (item.topics?.some((t) => t.topic === genre) ?? false);
         return match;
       });
-      if (feedData.length === 0) feedData = MOCK_NEWS;
+      if (feedData.length === 0) feedData = todayMocks;
     } else {
       feedData = data.feed;
     }
@@ -133,23 +179,22 @@ export async function GET(request: Request) {
     // 3. DB検索 (期間指定の実装)
     let query = supabase.from('news').select('*').order('published_at', { ascending: false });
 
-    if (symbol) query = query.eq('symbol', symbol);
-    
-    // 【修正点】期間指定ロジックの強化
-    if (startDate) {
-      // ハイフンなどを削除して数値文字列にする (2024-02-09 -> 20240209)
-      // 開始日は 00:00:00 から (日本時間で考えると -9h だが、開始は広めに取ってOK)
-      const startStr = startDate.replace(/\D/g, '') + 'T000000'; 
-      query = query.gte('published_at', startStr);
-    }
-    
-    if (endDate) {
-      // 【JST調整】
-      // 日本時間での「今日いっぱい(23:59:59)」は、UTCだと「今日の14:59:59」まで。
-      // UTCのまま 23:59 まで検索すると、日本時間の「翌日午前9時」まで含まれてしまうため、
-      // 終了時間を 145959 に早めて調整する。
-      const endStr = endDate.replace(/\D/g, '') + 'T145959'; 
-      query = query.lte('published_at', endStr);
+    if (type === 'latest') {
+      // 最新タブの場合は今日のニュースに絞る
+      query = query.gte('published_at', startStr).lte('published_at', endStr);
+    } else {
+      if (symbol) query = query.eq('symbol', symbol);
+      
+      // 【修正点】期間指定ロジックの強化
+      if (startDate) {
+        const startStrQuery = startDate.replace(/\D/g, '') + 'T000000'; 
+        query = query.gte('published_at', startStrQuery);
+      }
+      
+      if (endDate) {
+        const endStrQuery = endDate.replace(/\D/g, '') + 'T145959'; 
+        query = query.lte('published_at', endStrQuery);
+      }
     }
 
     const { data: searchResults } = await query.limit(100);

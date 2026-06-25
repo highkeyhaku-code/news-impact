@@ -86,10 +86,30 @@ export default function HomePage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
+  // 監視銘柄のシンボルリストと表示件数の制御
+  const [watchlistSymbols, setWatchlistSymbols] = useState<string[]>([]);
+  const [visibleCount, setVisibleCount] = useState(6);
+
+  // 監視銘柄のシンボルをDBから取得
+  useEffect(() => {
+    const fetchWatchlist = async () => {
+      try {
+        const { data, error } = await supabase.from('watchlist').select('symbol');
+        if (!error && data) {
+          setWatchlistSymbols(data.map(item => item.symbol.toUpperCase()));
+        }
+      } catch (e) {
+        console.error("監視銘柄の取得に失敗しました:", e);
+      }
+    };
+    fetchWatchlist();
+  }, []);
+
   // ニュース収集・取得関数 
   const fetchNewsFromApi = useCallback(async (isSearch = false, targetTab?: 'latest' | 'search' | 'bookmark') => {
     setLoading(true);
     setDbError(null);
+    setVisibleCount(6); // ニュース取得時に表示件数をリセット
     const currentTab = targetTab || activeTab;
 
     try {
@@ -166,6 +186,7 @@ export default function HomePage() {
 
   const handleTabChange = (tab: 'latest' | 'search' | 'bookmark') => {
     setActiveTab(tab);
+    setVisibleCount(6); // タブ切り替え時に表示件数をリセット
     if (tab === 'latest') {
       fetchNewsFromApi(false, 'latest'); 
     } else if (tab === 'bookmark') {
@@ -221,8 +242,15 @@ export default function HomePage() {
             </div>
           )}
           <div className="mb-6 flex justify-between items-center">
-            <h2 className="text-2xl font-bold text-gray-800">
-              {activeTab === 'latest' && '🔥 今日のヘッドライン'}
+            <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+              {activeTab === 'latest' && (
+                <>
+                  <span>🔥 今日のヘッドライン</span>
+                  <span className="bg-red-100 text-red-600 text-xs font-extrabold px-2.5 py-0.5 rounded-full border border-red-200">
+                    {newsList.length} 件
+                  </span>
+                </>
+              )}
               {activeTab === 'search' && '🔍 ニュース収集・検索'}
               {activeTab === 'bookmark' && '🔖 保存したニュース'}
             </h2>
@@ -274,13 +302,58 @@ export default function HomePage() {
           ) : newsList.length === 0 ? (
             <div className="text-center py-20 text-gray-400 bg-white rounded-xl border border-dashed border-gray-300">
               <span className="text-4xl block mb-2">🍃</span>
-              {activeTab === 'bookmark' ? 'ブックマークしたニュースはありません' : '条件に一致するニュースが見つかりません'}
+              {activeTab === 'bookmark' ? 'ブックマークしたニュースはありません' : '本日のニュースはありません'}
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {newsList.map((news) => (
-                <NewsCard key={news.id} news={news} onToggleBookmark={toggleBookmark} />
-              ))}
+            <div>
+              {/* 【工夫】最新タブの場合、ウォッチリスト登録銘柄のニュースを上部に注目ニュースとして横スクロールで表示 */}
+              {activeTab === 'latest' && newsList.filter(news => watchlistSymbols.includes(news.symbol.toUpperCase())).length > 0 && (
+                <div className="mb-8">
+                  <h3 className="text-sm font-bold text-gray-400 tracking-wider uppercase mb-3 flex items-center gap-1.5">
+                    <span>🎯</span> 監視銘柄の注目ヘッドライン
+                  </h3>
+                  <div className="flex gap-4 overflow-x-auto pb-4 pt-1 snap-x scrollbar-thin scrollbar-thumb-gray-200">
+                    {newsList
+                      .filter(news => watchlistSymbols.includes(news.symbol.toUpperCase()))
+                      .map((news) => (
+                        <div key={news.id} className="w-[320px] md:w-[380px] shrink-0 snap-start">
+                          <NewsCard news={news} onToggleBookmark={toggleBookmark} />
+                        </div>
+                      ))}
+                  </div>
+                  <hr className="border-gray-200 my-6" />
+                </div>
+              )}
+
+              {/* 【工夫】最新タブで注目ニュースがある場合、それ以外のニュースを表示。それ以外は全件表示 */}
+              {activeTab === 'latest' ? (
+                <>
+                  <h3 className="text-sm font-bold text-gray-400 tracking-wider uppercase mb-3 flex items-center gap-1.5">
+                    <span>📰</span> 今日のすべてのヘッドライン
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {newsList.slice(0, visibleCount).map((news) => (
+                      <NewsCard key={news.id} news={news} onToggleBookmark={toggleBookmark} />
+                    ))}
+                  </div>
+                  {newsList.length > visibleCount && (
+                    <div className="mt-8 text-center">
+                      <button
+                        onClick={() => setVisibleCount(prev => prev + 6)}
+                        className="px-6 py-3 bg-white border border-gray-200 text-gray-700 font-bold rounded-lg shadow-sm hover:shadow-md hover:bg-gray-50 transition-all flex items-center gap-2 mx-auto cursor-pointer"
+                      >
+                        <span>➕</span> さらに表示する (残り {newsList.length - visibleCount} 件)
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {newsList.map((news) => (
+                    <NewsCard key={news.id} news={news} onToggleBookmark={toggleBookmark} />
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
