@@ -30,9 +30,9 @@ export async function GET() {
         .from('news')
         .select('id')
         .eq('title', item.title)
-        .single();
+        .limit(1);
 
-      if (existing) {
+      if (existing && existing.length > 0) {
         continue; // 保存済みならスキップ
       }
 

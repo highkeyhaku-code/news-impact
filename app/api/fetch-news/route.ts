@@ -69,12 +69,13 @@ export async function GET(request: Request) {
 
   // 1. キャッシュチェック (latestのみ)
   if (type === 'latest') {
-    const { data: latestRecord } = await supabase
+    const { data: latestRecords } = await supabase
       .from('news')
       .select('created_at')
       .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
+
+    const latestRecord = latestRecords?.[0];
 
     if (latestRecord) {
       const lastFetchTime = parseISO(latestRecord.created_at);

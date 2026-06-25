@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import { addDays, subDays, format, parseISO } from 'date-fns';
 import AnalysisChartWrapper from '@/components/AnalysisChartWrapper';
+import WatchlistSwitcher from '@/app/company/[symbol]/WatchlistSwitcher';
 
 // 常に最新を取得
 export const revalidate = 0;
@@ -35,11 +36,13 @@ export default async function NewsDetailPage({ params }: { params: { id: string 
   const { id } = await params;
 
   // 1. ニュース取得
-  const { data: news, error } = await supabase
+  const { data: newsList, error } = await supabase
     .from('news')
     .select('*')
     .eq('id', id)
-    .single();
+    .limit(1);
+
+  const news = newsList?.[0];
 
   if (error || !news) {
     const isMissingTable = error?.code === '42P01';
@@ -60,6 +63,33 @@ export default async function NewsDetailPage({ params }: { params: { id: string 
       </div>
     );
   }
+
+  // 1.5 監視リストの登録状況チェック
+  const { data: watchlistData } = await supabase
+    .from('watchlist')
+    .select('*')
+    .eq('symbol', news.symbol)
+    .limit(1);
+
+  const watchlistItem = watchlistData?.[0] || null;
+
+  // 会社名フォールバック判定
+  const getCompanyName = (symbol: string, defaultVal?: string) => {
+    if (defaultVal) return defaultVal;
+    const defaults: { [key: string]: string } = {
+      AAPL: 'Apple Inc.',
+      GOOG: 'Alphabet Inc.',
+      AMZN: 'Amazon.com, Inc.',
+      MSFT: 'Microsoft Corporation',
+      TSLA: 'Tesla, Inc.',
+      META: 'Meta Platforms, Inc.',
+      NFLX: 'Netflix, Inc.',
+      NVDA: 'NVIDIA Corporation',
+    };
+    return defaults[symbol] || `${symbol} Corp.`;
+  };
+
+  const companyName = getCompanyName(news.symbol, watchlistItem?.company_name);
 
   // 2. 関連ニュース取得 (修正版: 表示中のニュース以外で、同じ企業のニュースを最新順に5件)
   const { data: relatedNews } = await supabase
@@ -166,6 +196,17 @@ export default async function NewsDetailPage({ params }: { params: { id: string 
             </a>
           </div>
         </div>
+
+        {/* 監視リストへのクイック追加・ステータス管理 */}
+        {news.symbol && news.symbol !== 'UNKNOWN' && (
+          <div className="mb-6">
+            <WatchlistSwitcher
+              symbol={news.symbol}
+              companyName={companyName}
+              initialLevel={watchlistItem ? (watchlistItem.attention_level || 'none') : null}
+            />
+          </div>
+        )}
 
         {/* 3. 株価チャートエリア */}
         <div className="mb-10">
